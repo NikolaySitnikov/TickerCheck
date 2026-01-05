@@ -3,6 +3,7 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { OPENAI_API_KEY } from './config.js';
 
 // Supabase Configuration
 const SUPABASE_URL = 'https://trjqzuojllkmnoyqupib.supabase.co';
@@ -20,9 +21,23 @@ const jsonToggleBtn = document.getElementById('json-toggle-btn');
 const jsonOutput = document.getElementById('json-output');
 const copyBtn = document.getElementById('copy-btn');
 const clearBtn = document.getElementById('clear-btn');
+const modelSelect = document.getElementById('model-select');
+const analyzeBtn = document.getElementById('analyze-btn');
+const promptInput = document.getElementById('prompt-input');
+const analysisSection = document.getElementById('analysis-section');
+const analysisStatus = document.getElementById('analysis-status');
+const analysisResults = document.getElementById('analysis-results');
+const packageBtn = document.getElementById('package-btn');
+const packageSection = document.getElementById('package-section');
+const packageOutput = document.getElementById('package-output');
+const packageStats = document.getElementById('package-stats');
+const packageImages = document.getElementById('package-images');
 
 let currentJobId = null;
 let currentResults = null;
+
+// Restore cached results on page load
+restoreCachedResults();
 
 // Handle search button click
 searchBtn.addEventListener('click', submitJob);
@@ -56,6 +71,17 @@ copyBtn.addEventListener('click', async () => {
     }
 });
 
+// Package button click
+packageBtn.addEventListener('click', packagePrompt);
+
+// Analyze button click
+analyzeBtn.addEventListener('click', analyzeTweets);
+
+// Save prompt to localStorage as user types
+promptInput.addEventListener('input', () => {
+    localStorage.setItem('cachedPrompt', promptInput.value);
+});
+
 /**
  * Submit a new scraping job
  */
@@ -72,11 +98,23 @@ async function submitJob() {
         ticker = '$' + ticker;
     }
 
-    // Disable button while processing
+    // Disable button and clear previous results completely
     searchBtn.disabled = true;
     resultsDiv.innerHTML = '';
     jsonSection.style.display = 'none';
+    jsonOutput.textContent = '';
+    jsonOutput.classList.add('hidden');
+    jsonToggleBtn.textContent = 'Show Raw JSON';
     currentResults = null;
+    currentJobId = null;
+    analyzeBtn.disabled = true;
+    packageBtn.disabled = true;
+    analysisSection.style.display = 'none';
+    analysisResults.innerHTML = '';
+    analysisStatus.className = 'status hidden';
+    packageSection.style.display = 'none';
+    packageOutput.textContent = '';
+    packageImages.innerHTML = '';
 
     showStatus(`Submitting job for ${ticker}...`, 'pending');
 
@@ -182,7 +220,7 @@ function handleJobUpdate(job) {
     }
     else if (job.status === 'completed') {
         showStatus(`Found ${job.results.length} tweets!`, 'completed');
-        displayResults(job.results);
+        displayResults(job.results, job.ticker);
         searchBtn.disabled = false;
     }
     else if (job.status === 'failed') {
@@ -202,8 +240,16 @@ function showStatus(message, type) {
 /**
  * Display tweet results
  */
-function displayResults(tweets) {
+function displayResults(tweets, ticker = null) {
     currentResults = tweets;
+
+    // Cache results to localStorage
+    if (tweets && tweets.length > 0) {
+        localStorage.setItem('cachedResults', JSON.stringify(tweets));
+        if (ticker) {
+            localStorage.setItem('cachedTicker', ticker);
+        }
+    }
 
     if (!tweets || tweets.length === 0) {
         resultsDiv.innerHTML = '<div class="no-results">No tweets found</div>';
@@ -225,15 +271,7 @@ function displayResults(tweets) {
                 `;
             }
 
-            // Video thumbnails
-            if (tweet.media.videoThumbnails && tweet.media.videoThumbnails.length > 0) {
-                mediaHtml += `
-                    <div class="media-label">Video</div>
-                    <div class="tweet-media tweet-media-single">
-                        ${tweet.media.videoThumbnails.map(img => `<img src="${escapeHtml(img)}" alt="Video thumbnail" loading="lazy" />`).join('')}
-                    </div>
-                `;
-            }
+            // Video: don't display thumbnail, only show tweet text
 
             // GIFs
             if (tweet.media.gifs && tweet.media.gifs.length > 0) {
@@ -265,9 +303,10 @@ function displayResults(tweets) {
         `;
     }).join('');
 
-    // Show JSON section
+    // Show JSON section and enable buttons
     jsonSection.style.display = 'block';
     jsonOutput.textContent = JSON.stringify(tweets, null, 2);
+    packageBtn.disabled = false;
 }
 
 /**
@@ -294,7 +333,339 @@ function clearResults() {
     currentResults = null;
     currentJobId = null;
     searchBtn.disabled = false;
+    analyzeBtn.disabled = true;
+    packageBtn.disabled = true;
+    analysisSection.style.display = 'none';
+    analysisResults.innerHTML = '';
+    analysisStatus.className = 'status hidden';
+    packageSection.style.display = 'none';
+    packageOutput.textContent = '';
+    packageImages.innerHTML = '';
+    // Clear localStorage cache
+    localStorage.removeItem('cachedResults');
+    localStorage.removeItem('cachedTicker');
     tickerInput.focus();
+}
+
+/**
+ * Package tweets for OpenAI analysis (token-optimized)
+ */
+function packageTweetsForAnalysis(tweets) {
+    return tweets.map(tweet => {
+        const packaged = {
+            author: `${tweet.author.displayName} (@${tweet.author.username})`,
+            time: tweet.timestamp,
+            text: tweet.text
+        };
+        // Include images only (skip videos per requirements)
+        if (tweet.media?.images?.length > 0) {
+            packaged.images = tweet.media.images;
+        }
+        return packaged;
+    });
+}
+
+/**
+ * Package and preview the prompt before sending to OpenAI
+ */
+function packagePrompt() {
+    if (!currentResults || currentResults.length === 0) {
+        return;
+    }
+
+    const userPrompt = promptInput.value.trim();
+    if (!userPrompt) {
+        packageSection.style.display = 'block';
+        packageOutput.textContent = '⚠️ Please enter an analysis prompt first';
+        packageStats.textContent = '';
+        packageImages.innerHTML = '';
+        analyzeBtn.disabled = true;
+        return;
+    }
+
+    const packagedTweets = packageTweetsForAnalysis(currentResults);
+
+    // Build the text portion of the prompt
+    const textContent = userPrompt + '\n\nTweet data:\n' + JSON.stringify(packagedTweets, null, 2);
+
+    // Collect all images
+    const allImages = [];
+    for (const tweet of packagedTweets) {
+        if (tweet.images) {
+            allImages.push(...tweet.images);
+        }
+    }
+
+    // Calculate approximate token count (rough estimate: 4 chars per token)
+    const estimatedTokens = Math.ceil(textContent.length / 4);
+
+    // Display the packaged prompt
+    packageSection.style.display = 'block';
+    packageOutput.textContent = textContent;
+    packageStats.textContent = `~${estimatedTokens.toLocaleString()} text tokens | ${allImages.length} images`;
+
+    // Display image thumbnails
+    if (allImages.length > 0) {
+        packageImages.innerHTML = `
+            <div class="package-images-label">Images to be analyzed (${allImages.length}):</div>
+            <div class="package-images-grid">
+                ${allImages.map(url => `<img src="${escapeHtml(url)}" alt="Tweet image" loading="lazy" />`).join('')}
+            </div>
+        `;
+    } else {
+        packageImages.innerHTML = '<div class="package-images-label">No images in this batch</div>';
+    }
+
+    // Enable analyze button
+    analyzeBtn.disabled = false;
+}
+
+/**
+ * Show analysis status message
+ */
+function showAnalysisStatus(message, type) {
+    analysisStatus.textContent = message;
+    analysisStatus.className = `status ${type}`;
+}
+
+/**
+ * Display analysis results
+ */
+function displayAnalysis(text) {
+    // Convert markdown-style formatting to HTML (basic)
+    const formatted = escapeHtml(text)
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n/g, '<br>');
+
+    analysisResults.innerHTML = formatted;
+}
+
+/**
+ * Convert image URL to base64 data URL
+ */
+async function imageUrlToBase64(url) {
+    try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Failed to fetch image');
+        const blob = await response.blob();
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+    } catch (error) {
+        console.warn('Failed to convert image:', url, error);
+        return null;
+    }
+}
+
+/**
+ * Analyze tweets with OpenAI
+ */
+async function analyzeTweets() {
+    if (!currentResults || currentResults.length === 0) {
+        showAnalysisStatus('No tweets to analyze', 'failed');
+        return;
+    }
+
+    const userPrompt = promptInput.value.trim();
+    if (!userPrompt) {
+        showAnalysisStatus('Please enter an analysis prompt', 'failed');
+        return;
+    }
+
+    // Disable button and show loading state
+    analyzeBtn.disabled = true;
+    analyzeBtn.textContent = 'Analyzing...';
+    analysisSection.style.display = 'block';
+    analysisResults.innerHTML = '';
+    showAnalysisStatus('Converting images to base64...', 'processing');
+
+    try {
+        const packagedTweets = packageTweetsForAnalysis(currentResults);
+
+        // Collect all image URLs
+        const allImageUrls = [];
+        for (const tweet of packagedTweets) {
+            if (tweet.images) {
+                allImageUrls.push(...tweet.images);
+            }
+        }
+
+        // Convert ALL images to base64
+        showAnalysisStatus(`Converting ${allImageUrls.length} images...`, 'processing');
+
+        const base64Images = [];
+        for (let i = 0; i < allImageUrls.length; i++) {
+            const base64 = await imageUrlToBase64(allImageUrls[i]);
+            if (base64) {
+                base64Images.push(base64);
+            }
+            // Update progress every 5 images
+            if ((i + 1) % 5 === 0) {
+                showAnalysisStatus(`Converting images... ${i + 1}/${allImageUrls.length}`, 'processing');
+            }
+        }
+
+        showAnalysisStatus(`Sending to OpenAI with ${base64Images.length} images...`, 'processing');
+
+        // Build content array with text + base64 images
+        const content = [
+            { type: 'text', text: userPrompt + '\n\nTweet data:\n' + JSON.stringify(packagedTweets, null, 2) }
+        ];
+
+        // Add base64 images for vision analysis with HIGH detail for charts
+        for (const base64Data of base64Images) {
+            content.push({
+                type: 'image_url',
+                image_url: { url: base64Data, detail: 'high' }
+            });
+        }
+
+        const selectedModel = modelSelect.value;
+        const useWebSearch = selectedModel.includes('search');
+        const actualModel = useWebSearch ? 'gpt-5.2' : selectedModel;
+
+        let analysisText;
+
+        if (useWebSearch) {
+            // Use Responses API with web_search tool
+            const inputText = userPrompt + '\n\nTweet data:\n' + JSON.stringify(packagedTweets, null, 2);
+
+            // Build content array with text + images
+            const messageContent = [
+                { type: 'input_text', text: inputText }
+            ];
+
+            // Add images
+            for (const base64Data of base64Images) {
+                messageContent.push({
+                    type: 'input_image',
+                    image_url: base64Data
+                });
+            }
+
+            const response = await fetch('https://api.openai.com/v1/responses', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${OPENAI_API_KEY}`
+                },
+                body: JSON.stringify({
+                    model: actualModel,
+                    input: [
+                        {
+                            role: 'user',
+                            content: messageContent
+                        }
+                    ],
+                    tools: [{ type: 'web_search' }]
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error?.message || `API error: ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            // Parse Responses API output array
+            // The structure is: output[] -> items with type "message" -> content[] -> text
+            analysisText = '';
+            if (data.output_text) {
+                // Some versions include a convenience field
+                analysisText = data.output_text;
+            } else if (data.output && Array.isArray(data.output)) {
+                // Parse the output array manually
+                for (const item of data.output) {
+                    if (item.type === 'message' && item.content) {
+                        for (const contentItem of item.content) {
+                            if (contentItem.type === 'output_text' && contentItem.text) {
+                                analysisText += contentItem.text;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!analysisText) {
+                console.log('Responses API raw response:', JSON.stringify(data, null, 2));
+                analysisText = 'No analysis returned. Check console for raw response.';
+            }
+
+        } else {
+            // Use Chat Completions API (no web search)
+            const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${OPENAI_API_KEY}`
+                },
+                body: JSON.stringify({
+                    model: actualModel,
+                    messages: [{ role: 'user', content }],
+                    max_completion_tokens: 4000
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error?.message || `API error: ${response.status}`);
+            }
+
+            const data = await response.json();
+            analysisText = data.choices[0]?.message?.content || 'No analysis returned';
+        }
+
+        showAnalysisStatus('Analysis complete', 'completed');
+        displayAnalysis(analysisText);
+
+    } catch (error) {
+        console.error('Analysis error:', error);
+        showAnalysisStatus(`Error: ${error.message}`, 'failed');
+    } finally {
+        analyzeBtn.disabled = false;
+        analyzeBtn.textContent = 'Analyze with AI';
+    }
+}
+
+/**
+ * Restore cached results from localStorage on page load
+ */
+function restoreCachedResults() {
+    try {
+        const cachedResults = localStorage.getItem('cachedResults');
+        const cachedTicker = localStorage.getItem('cachedTicker');
+
+        if (cachedResults) {
+            const tweets = JSON.parse(cachedResults);
+            if (tweets && tweets.length > 0) {
+                displayResults(tweets);
+                if (cachedTicker) {
+                    tickerInput.value = cachedTicker;
+                }
+                showStatus(`Restored ${tweets.length} tweets from cache`, 'completed');
+            }
+        }
+
+        // Restore cached prompt
+        const cachedPrompt = localStorage.getItem('cachedPrompt');
+        if (cachedPrompt) {
+            promptInput.value = cachedPrompt;
+        }
+
+        // Enable analyze button if we have both results and prompt
+        if (currentResults && currentResults.length > 0 && cachedPrompt && cachedPrompt.trim()) {
+            analyzeBtn.disabled = false;
+        }
+    } catch (e) {
+        console.error('Error restoring cached results:', e);
+        localStorage.removeItem('cachedResults');
+        localStorage.removeItem('cachedTicker');
+        localStorage.removeItem('cachedPrompt');
+    }
 }
 
 // Initial focus
