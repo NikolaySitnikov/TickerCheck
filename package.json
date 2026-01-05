@@ -1,0 +1,14 @@
+{
+  "name": "twitter-scraper-worker",
+  "version": "1.0.0",
+  "description": "Worker that scrapes Twitter using Chrome remote debugging",
+  "main": "worker.js",
+  "scripts": {
+    "start": "node worker.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "dotenv": "^16.3.1",
+    "puppeteer-core": "^24.34.0"
+  }
+}
