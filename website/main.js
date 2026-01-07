@@ -806,10 +806,10 @@ function renderHistory(history) {
                     ${hasAnalysis ? '<span class="history-card-badge">Analyzed</span>' : ''}
                 </div>
                 <div class="history-card-content">
+                    ${analysisHtml}
                     <div class="history-tweets-preview">
                         ${tweetsHtml}
                     </div>
-                    ${analysisHtml}
                 </div>
             </div>
         `;
