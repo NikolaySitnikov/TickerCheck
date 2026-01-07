@@ -140,6 +140,11 @@ for (const item of data.output) {
 
 ## Frontend Features
 
-- **localStorage Caching**: Search results, ticker, and analysis prompt persist across page refreshes
+- **localStorage Caching**: Search results, ticker, analysis, and prompt persist across page refreshes
 - **Auto-expanding Textarea**: Uses `field-sizing: content` CSS property
-- **Package Preview**: Shows packaged prompt with token estimate and image thumbnails before sending to OpenAI
+- **Search History**: Automatically saves tweets + AI analysis when starting new search or clearing
+  - Expandable cards with tweet text, images, and "View on Twitter" links
+  - Green "Analyzed" badge for entries with AI analysis
+  - Max 20 entries, oldest auto-deleted
+  - Clear History button to wipe all saved searches
+- **Input Clear Button**: Small × inside ticker input field to quickly clear text

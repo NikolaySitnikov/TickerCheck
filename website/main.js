@@ -77,9 +77,16 @@ const analysisResults = document.getElementById('analysis-results');
 const promptToggle = document.getElementById('prompt-toggle');
 const promptContent = document.getElementById('prompt-content');
 const promptInput = document.getElementById('prompt-input');
+const historySection = document.getElementById('history-section');
+const historyCards = document.getElementById('history-cards');
+const clearHistoryBtn = document.getElementById('clear-history-btn');
+const clearInputBtn = document.getElementById('clear-input-btn');
 
 let currentJobId = null;
 let currentResults = null;
+let currentTicker = null;
+let currentAnalysis = null;
+let currentModel = null;
 
 // Restore cached results on page load
 restoreCachedResults();
@@ -144,6 +151,9 @@ async function submitJob() {
         ticker = '$' + ticker;
     }
 
+    // Save current results to history before starting new search
+    saveToHistory();
+
     // Disable button and clear previous results completely
     searchBtn.disabled = true;
     resultsDiv.innerHTML = '';
@@ -153,6 +163,9 @@ async function submitJob() {
     jsonToggleBtn.textContent = 'Show Raw JSON';
     currentResults = null;
     currentJobId = null;
+    currentTicker = null;
+    currentAnalysis = null;
+    currentModel = null;
     analyzeBtn.disabled = true;
     analysisSection.style.display = 'none';
     analysisResults.innerHTML = '';
@@ -284,6 +297,9 @@ function showStatus(message, type) {
  */
 function displayResults(tweets, ticker = null) {
     currentResults = tweets;
+    if (ticker) {
+        currentTicker = ticker;
+    }
 
     // Cache results to localStorage
     if (tweets && tweets.length > 0) {
@@ -365,6 +381,9 @@ function escapeHtml(text) {
  * Clear all results
  */
 function clearResults() {
+    // Save current results to history before clearing
+    saveToHistory();
+
     tickerInput.value = '';
     statusDiv.className = 'status hidden';
     resultsDiv.innerHTML = '';
@@ -374,6 +393,9 @@ function clearResults() {
     jsonToggleBtn.textContent = 'Show Raw JSON';
     currentResults = null;
     currentJobId = null;
+    currentTicker = null;
+    currentAnalysis = null;
+    currentModel = null;
     searchBtn.disabled = false;
     analyzeBtn.disabled = true;
     analysisSection.style.display = 'none';
@@ -382,6 +404,8 @@ function clearResults() {
     // Clear localStorage cache
     localStorage.removeItem('cachedResults');
     localStorage.removeItem('cachedTicker');
+    localStorage.removeItem('cachedAnalysis');
+    localStorage.removeItem('cachedModel');
     tickerInput.focus();
 }
 
@@ -599,6 +623,12 @@ async function analyzeTweets() {
             analysisText = data.choices[0]?.message?.content || 'No analysis returned';
         }
 
+        // Store for history (both in memory and localStorage)
+        currentAnalysis = analysisText;
+        currentModel = selectedModel;
+        localStorage.setItem('cachedAnalysis', analysisText);
+        localStorage.setItem('cachedModel', selectedModel);
+
         showAnalysisStatus('Analysis complete', 'completed');
         displayAnalysis(analysisText);
 
@@ -618,6 +648,8 @@ function restoreCachedResults() {
     try {
         const cachedResults = localStorage.getItem('cachedResults');
         const cachedTicker = localStorage.getItem('cachedTicker');
+        const cachedAnalysis = localStorage.getItem('cachedAnalysis');
+        const cachedModel = localStorage.getItem('cachedModel');
 
         if (cachedResults) {
             const tweets = JSON.parse(cachedResults);
@@ -625,6 +657,15 @@ function restoreCachedResults() {
                 displayResults(tweets);
                 if (cachedTicker) {
                     tickerInput.value = cachedTicker;
+                    currentTicker = cachedTicker;
+                }
+                // Restore analysis if it exists
+                if (cachedAnalysis) {
+                    currentAnalysis = cachedAnalysis;
+                    currentModel = cachedModel;
+                    analysisSection.style.display = 'block';
+                    displayAnalysis(cachedAnalysis);
+                    showAnalysisStatus('Restored from cache', 'completed');
                 }
                 showStatus(`Restored ${tweets.length} tweets from cache`, 'completed');
             }
@@ -633,7 +674,162 @@ function restoreCachedResults() {
         console.error('Error restoring cached results:', e);
         localStorage.removeItem('cachedResults');
         localStorage.removeItem('cachedTicker');
+        localStorage.removeItem('cachedAnalysis');
+        localStorage.removeItem('cachedModel');
     }
+}
+
+// Clear history button
+clearHistoryBtn.addEventListener('click', clearHistory);
+
+// Clear input button (X inside the field)
+clearInputBtn.addEventListener('click', () => {
+    tickerInput.value = '';
+    tickerInput.focus();
+});
+
+// Load history on startup
+loadHistory();
+
+/**
+ * Save current search to history
+ */
+function saveToHistory() {
+    if (!currentResults || currentResults.length === 0) {
+        return; // Nothing to save
+    }
+
+    const historyEntry = {
+        id: Date.now(),
+        ticker: currentTicker || tickerInput.value.trim() || 'Unknown',
+        tweets: currentResults,
+        analysis: currentAnalysis,
+        model: currentModel,
+        timestamp: new Date().toISOString()
+    };
+
+    // Load existing history
+    let history = [];
+    try {
+        const stored = localStorage.getItem('searchHistory');
+        if (stored) {
+            history = JSON.parse(stored);
+        }
+    } catch (e) {
+        console.error('Error loading history:', e);
+    }
+
+    // Add new entry at the beginning
+    history.unshift(historyEntry);
+
+    // Keep only last 20 entries
+    if (history.length > 20) {
+        history = history.slice(0, 20);
+    }
+
+    // Save back
+    localStorage.setItem('searchHistory', JSON.stringify(history));
+
+    // Re-render history
+    renderHistory(history);
+}
+
+/**
+ * Load history from localStorage
+ */
+function loadHistory() {
+    try {
+        const stored = localStorage.getItem('searchHistory');
+        if (stored) {
+            const history = JSON.parse(stored);
+            renderHistory(history);
+        }
+    } catch (e) {
+        console.error('Error loading history:', e);
+    }
+}
+
+/**
+ * Render history cards
+ */
+function renderHistory(history) {
+    if (!history || history.length === 0) {
+        historySection.style.display = 'none';
+        return;
+    }
+
+    historySection.style.display = 'block';
+
+    historyCards.innerHTML = history.map(entry => {
+        const date = new Date(entry.timestamp);
+        const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const tweetCount = entry.tweets?.length || 0;
+        const hasAnalysis = !!entry.analysis;
+
+        // All tweets with links and images
+        const tweetsHtml = (entry.tweets || []).map(tweet => {
+            // Build images HTML
+            let imagesHtml = '';
+            if (tweet.media?.images?.length > 0) {
+                const gridClass = tweet.media.images.length === 1 ? 'history-tweet-media history-tweet-media-single' : 'history-tweet-media';
+                imagesHtml = `
+                    <div class="${gridClass}">
+                        ${tweet.media.images.map(img => `<img src="${escapeHtml(img)}" alt="Tweet image" loading="lazy" onclick="window.open('${escapeHtml(img)}', '_blank')" />`).join('')}
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="history-tweet-item">
+                    <div class="history-tweet-author">${escapeHtml(tweet.author?.displayName || '')} ${escapeHtml(tweet.author?.username || '')}</div>
+                    <div class="history-tweet-text">${escapeHtml(tweet.text || '')}</div>
+                    ${imagesHtml}
+                    ${tweet.url ? `<a href="${escapeHtml(tweet.url)}" target="_blank" class="history-tweet-link">View on Twitter</a>` : ''}
+                </div>
+            `;
+        }).join('');
+
+        // Analysis section if available
+        const analysisHtml = hasAnalysis ? `
+            <div class="history-analysis">
+                <div class="history-analysis-title">AI Analysis (${escapeHtml(entry.model || 'Unknown model')})</div>
+                <div class="history-analysis-text">${escapeHtml(entry.analysis)}</div>
+            </div>
+        ` : '';
+
+        return `
+            <div class="history-card" data-id="${entry.id}">
+                <div class="history-card-header">
+                    <span class="history-card-arrow">▶</span>
+                    <span class="history-card-ticker">${escapeHtml(entry.ticker)}</span>
+                    <span class="history-card-meta">${formattedDate} • ${tweetCount} tweets</span>
+                    ${hasAnalysis ? '<span class="history-card-badge">Analyzed</span>' : ''}
+                </div>
+                <div class="history-card-content">
+                    <div class="history-tweets-preview">
+                        ${tweetsHtml}
+                    </div>
+                    ${analysisHtml}
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    // Add click handlers for expand/collapse
+    historyCards.querySelectorAll('.history-card-header').forEach(header => {
+        header.addEventListener('click', () => {
+            header.parentElement.classList.toggle('expanded');
+        });
+    });
+}
+
+/**
+ * Clear all history
+ */
+function clearHistory() {
+    localStorage.removeItem('searchHistory');
+    historySection.style.display = 'none';
+    historyCards.innerHTML = '';
 }
 
 // Initial focus

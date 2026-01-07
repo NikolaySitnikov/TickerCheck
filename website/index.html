@@ -55,6 +55,36 @@
             color: #666;
         }
 
+        .input-wrapper {
+            position: relative;
+            flex: 1;
+        }
+
+        .input-wrapper input[type="text"] {
+            width: 100%;
+            padding-right: 36px;
+        }
+
+        .clear-input-btn {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #666;
+            font-size: 20px;
+            cursor: pointer;
+            line-height: 1;
+            display: none;
+        }
+
+        .clear-input-btn:hover {
+            color: #fff;
+        }
+
+        .input-wrapper input:not(:placeholder-shown) + .clear-input-btn {
+            display: block;
+        }
+
         button {
             padding: 14px 24px;
             font-size: 16px;
@@ -365,6 +395,186 @@
         .prompt-textarea:focus {
             border-color: #10a37f;
         }
+
+        /* History section */
+        .history-section {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #2f2f2f;
+        }
+
+        .history-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .history-header h2 {
+            font-size: 18px;
+            color: #888;
+        }
+
+        .clear-history-btn {
+            background: #333;
+            padding: 8px 14px;
+            font-size: 13px;
+        }
+
+        .clear-history-btn:hover {
+            background: #444;
+        }
+
+        .history-cards {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .history-card {
+            background: #1a1a1a;
+            border: 1px solid #2f2f2f;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .history-card-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 16px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .history-card-header:hover {
+            background: #222;
+        }
+
+        .history-card-arrow {
+            color: #666;
+            transition: transform 0.2s;
+        }
+
+        .history-card.expanded .history-card-arrow {
+            transform: rotate(90deg);
+        }
+
+        .history-card-ticker {
+            font-weight: 600;
+            color: #1d9bf0;
+        }
+
+        .history-card-meta {
+            color: #666;
+            font-size: 13px;
+        }
+
+        .history-card-badge {
+            margin-left: auto;
+            padding: 4px 8px;
+            font-size: 11px;
+            background: #10a37f;
+            color: #fff;
+            border-radius: 4px;
+        }
+
+        .history-card-content {
+            display: none;
+            padding: 0 16px 16px;
+            border-top: 1px solid #2f2f2f;
+        }
+
+        .history-card.expanded .history-card-content {
+            display: block;
+        }
+
+        .history-tweets-preview {
+            margin-top: 12px;
+        }
+
+        .history-tweet-item {
+            padding: 10px;
+            margin-bottom: 8px;
+            background: #111;
+            border-radius: 8px;
+            font-size: 13px;
+        }
+
+        .history-tweet-author {
+            font-weight: 500;
+            color: #aaa;
+            margin-bottom: 4px;
+        }
+
+        .history-tweet-text {
+            color: #ccc;
+            line-height: 1.4;
+        }
+
+        .history-tweet-link {
+            display: inline-block;
+            margin-top: 6px;
+            color: #1d9bf0;
+            text-decoration: none;
+            font-size: 12px;
+        }
+
+        .history-tweet-link:hover {
+            text-decoration: underline;
+        }
+
+        .history-tweet-media {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 6px;
+            margin: 8px 0;
+        }
+
+        .history-tweet-media img {
+            width: 100%;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .history-tweet-media img:hover {
+            opacity: 0.85;
+        }
+
+        .history-tweet-media-single img {
+            max-width: 100%;
+            max-height: 200px;
+            object-fit: contain;
+        }
+
+        .history-analysis {
+            margin-top: 16px;
+            padding: 12px;
+            background: #0d2818;
+            border: 1px solid #10a37f33;
+            border-radius: 8px;
+        }
+
+        .history-analysis-title {
+            font-size: 13px;
+            color: #10a37f;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .history-analysis-text {
+            font-size: 13px;
+            color: #ccc;
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+
+        .history-empty {
+            text-align: center;
+            padding: 30px;
+            color: #666;
+        }
     </style>
 </head>
 <body>
@@ -372,12 +582,15 @@
         <h1>Ticker Scraper</h1>
 
         <div class="search-box">
-            <input
-                type="text"
-                id="ticker-input"
-                placeholder="Enter ticker (e.g. $BTC, $SOL)"
-                autocomplete="off"
-            />
+            <div class="input-wrapper">
+                <input
+                    type="text"
+                    id="ticker-input"
+                    placeholder="Enter ticker (e.g. $BTC, $SOL)"
+                    autocomplete="off"
+                />
+                <span id="clear-input-btn" class="clear-input-btn">&times;</span>
+            </div>
             <button id="search-btn">Search</button>
             <button id="clear-btn" class="clear-btn">Clear</button>
         </div>
@@ -417,6 +630,15 @@
             <h3>AI Analysis</h3>
             <div id="analysis-status" class="status hidden"></div>
             <div id="analysis-results" class="analysis-results"></div>
+        </div>
+
+        <!-- Search History -->
+        <div id="history-section" class="history-section" style="display: none;">
+            <div class="history-header">
+                <h2>Search History</h2>
+                <button id="clear-history-btn" class="clear-history-btn">Clear History</button>
+            </div>
+            <div id="history-cards" class="history-cards"></div>
         </div>
     </div>
 
