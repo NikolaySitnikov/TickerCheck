@@ -5,6 +5,54 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { OPENAI_API_KEY } from './config.js';
 
+// Fixed analysis prompt - elite crypto trader brief
+const ANALYSIS_PROMPT = `You are an elite crypto derivatives trader and technical analyst. Your job is to synthesize social sentiment, chart analysis, and current news into a tight tactical brief. You are known for cutting through noise — not repeating it.
+
+## INPUT
+- **Ticker**: e.g., $SOL, $BTC
+- **~20 Recent Twitter Posts** (Top Search) with: author, timestamp, text, attached images (usually charts)
+
+## INTERNAL PROCESSING (DO NOT OUTPUT THIS SECTION)
+Silently analyze each post for:
+- Thesis, directional bias, specific levels (entries/targets/stops)
+- Chart timeframes, patterns, indicators, and whether setups are still valid
+- Quality filter: real alpha vs. vibes/noise/brag posts/scams
+- Temporal relevance: has the setup played out? Is it forward-looking or post-hoc?
+- Convergence: are multiple traders piling into the same idea?
+
+Then **use web search** to find: recent news/catalysts, funding rates, OI data, ecosystem developments, and any red flags.
+
+## OUTPUT FORMAT (THIS IS YOUR ENTIRE RESPONSE)
+
+**$[TICKER] BRIEF — [Date/Time]**
+
+**SENTIMENT**: [Bullish/Bearish/Mixed] — [1 sentence max]
+
+**KEY LEVELS** (aggregated from charts):
+- Resistance: [levels]
+- Support: [levels]
+- Invalidation: [level + context]
+
+**SETUPS WORTH WATCHING** (2-4 max, only credible ones):
+- [Setup 1: direction, trigger, target, stop — 1 line]
+- [Setup 2: ...]
+
+**CATALYSTS / NEWS**: [2-3 sentences max — what's driving this?]
+
+**RED FLAGS**: [Crowded trades, scam links, conflicting signals, data gaps — bullet if needed]
+
+**BOTTOM LINE**: [2-3 sentences: Is there edge? What's the play? What invalidates it?]
+
+---
+
+## CRITICAL RULES
+- **DO NOT list or summarize individual tweets.** Synthesize them.
+- **DO NOT repeat tweet content back.** Extract the signal, discard the noise.
+- If 15 tweets say the same thing, that's ONE data point (consensus), not 15.
+- Brevity is mandatory. If you can say it in fewer words, do it.
+- If the data is low quality or there's no edge, say so in 1-2 sentences and stop.
+- Total response should be under 400 words unless complexity genuinely demands more.`;
+
 // Supabase Configuration
 const SUPABASE_URL = 'https://trjqzuojllkmnoyqupib.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyanF6dW9qbGxrbW5veXF1cGliIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc1ODEwMDYsImV4cCI6MjA4MzE1NzAwNn0.9iTi4y_wrYnk7MOu3AS5TLu0V7Cjcp790Po3gIQNd38';
@@ -23,15 +71,12 @@ const copyBtn = document.getElementById('copy-btn');
 const clearBtn = document.getElementById('clear-btn');
 const modelSelect = document.getElementById('model-select');
 const analyzeBtn = document.getElementById('analyze-btn');
-const promptInput = document.getElementById('prompt-input');
 const analysisSection = document.getElementById('analysis-section');
 const analysisStatus = document.getElementById('analysis-status');
 const analysisResults = document.getElementById('analysis-results');
-const packageBtn = document.getElementById('package-btn');
-const packageSection = document.getElementById('package-section');
-const packageOutput = document.getElementById('package-output');
-const packageStats = document.getElementById('package-stats');
-const packageImages = document.getElementById('package-images');
+const promptToggle = document.getElementById('prompt-toggle');
+const promptContent = document.getElementById('prompt-content');
+const promptInput = document.getElementById('prompt-input');
 
 let currentJobId = null;
 let currentResults = null;
@@ -71,16 +116,17 @@ copyBtn.addEventListener('click', async () => {
     }
 });
 
-// Package button click
-packageBtn.addEventListener('click', packagePrompt);
-
 // Analyze button click
 analyzeBtn.addEventListener('click', analyzeTweets);
 
-// Save prompt to localStorage as user types
-promptInput.addEventListener('input', () => {
-    localStorage.setItem('cachedPrompt', promptInput.value);
+// Prompt toggle (collapsible)
+promptToggle.addEventListener('click', () => {
+    promptToggle.classList.toggle('expanded');
+    promptContent.classList.toggle('visible');
 });
+
+// Initialize prompt textarea with default prompt
+promptInput.value = ANALYSIS_PROMPT;
 
 /**
  * Submit a new scraping job
@@ -108,13 +154,9 @@ async function submitJob() {
     currentResults = null;
     currentJobId = null;
     analyzeBtn.disabled = true;
-    packageBtn.disabled = true;
     analysisSection.style.display = 'none';
     analysisResults.innerHTML = '';
     analysisStatus.className = 'status hidden';
-    packageSection.style.display = 'none';
-    packageOutput.textContent = '';
-    packageImages.innerHTML = '';
 
     showStatus(`Submitting job for ${ticker}...`, 'pending');
 
@@ -303,10 +345,10 @@ function displayResults(tweets, ticker = null) {
         `;
     }).join('');
 
-    // Show JSON section and enable buttons
+    // Show JSON section and enable analyze button
     jsonSection.style.display = 'block';
     jsonOutput.textContent = JSON.stringify(tweets, null, 2);
-    packageBtn.disabled = false;
+    analyzeBtn.disabled = false;
 }
 
 /**
@@ -334,13 +376,9 @@ function clearResults() {
     currentJobId = null;
     searchBtn.disabled = false;
     analyzeBtn.disabled = true;
-    packageBtn.disabled = true;
     analysisSection.style.display = 'none';
     analysisResults.innerHTML = '';
     analysisStatus.className = 'status hidden';
-    packageSection.style.display = 'none';
-    packageOutput.textContent = '';
-    packageImages.innerHTML = '';
     // Clear localStorage cache
     localStorage.removeItem('cachedResults');
     localStorage.removeItem('cachedTicker');
@@ -363,61 +401,6 @@ function packageTweetsForAnalysis(tweets) {
         }
         return packaged;
     });
-}
-
-/**
- * Package and preview the prompt before sending to OpenAI
- */
-function packagePrompt() {
-    if (!currentResults || currentResults.length === 0) {
-        return;
-    }
-
-    const userPrompt = promptInput.value.trim();
-    if (!userPrompt) {
-        packageSection.style.display = 'block';
-        packageOutput.textContent = '⚠️ Please enter an analysis prompt first';
-        packageStats.textContent = '';
-        packageImages.innerHTML = '';
-        analyzeBtn.disabled = true;
-        return;
-    }
-
-    const packagedTweets = packageTweetsForAnalysis(currentResults);
-
-    // Build the text portion of the prompt
-    const textContent = userPrompt + '\n\nTweet data:\n' + JSON.stringify(packagedTweets, null, 2);
-
-    // Collect all images
-    const allImages = [];
-    for (const tweet of packagedTweets) {
-        if (tweet.images) {
-            allImages.push(...tweet.images);
-        }
-    }
-
-    // Calculate approximate token count (rough estimate: 4 chars per token)
-    const estimatedTokens = Math.ceil(textContent.length / 4);
-
-    // Display the packaged prompt
-    packageSection.style.display = 'block';
-    packageOutput.textContent = textContent;
-    packageStats.textContent = `~${estimatedTokens.toLocaleString()} text tokens | ${allImages.length} images`;
-
-    // Display image thumbnails
-    if (allImages.length > 0) {
-        packageImages.innerHTML = `
-            <div class="package-images-label">Images to be analyzed (${allImages.length}):</div>
-            <div class="package-images-grid">
-                ${allImages.map(url => `<img src="${escapeHtml(url)}" alt="Tweet image" loading="lazy" />`).join('')}
-            </div>
-        `;
-    } else {
-        packageImages.innerHTML = '<div class="package-images-label">No images in this batch</div>';
-    }
-
-    // Enable analyze button
-    analyzeBtn.disabled = false;
 }
 
 /**
@@ -469,12 +452,6 @@ async function analyzeTweets() {
         return;
     }
 
-    const userPrompt = promptInput.value.trim();
-    if (!userPrompt) {
-        showAnalysisStatus('Please enter an analysis prompt', 'failed');
-        return;
-    }
-
     // Disable button and show loading state
     analyzeBtn.disabled = true;
     analyzeBtn.textContent = 'Analyzing...';
@@ -509,6 +486,9 @@ async function analyzeTweets() {
         }
 
         showAnalysisStatus(`Sending to OpenAI with ${base64Images.length} images...`, 'processing');
+
+        // Get prompt from textarea (allows user customization)
+        const userPrompt = promptInput.value.trim() || ANALYSIS_PROMPT;
 
         // Build content array with text + base64 images
         const content = [
@@ -649,22 +629,10 @@ function restoreCachedResults() {
                 showStatus(`Restored ${tweets.length} tweets from cache`, 'completed');
             }
         }
-
-        // Restore cached prompt
-        const cachedPrompt = localStorage.getItem('cachedPrompt');
-        if (cachedPrompt) {
-            promptInput.value = cachedPrompt;
-        }
-
-        // Enable analyze button if we have both results and prompt
-        if (currentResults && currentResults.length > 0 && cachedPrompt && cachedPrompt.trim()) {
-            analyzeBtn.disabled = false;
-        }
     } catch (e) {
         console.error('Error restoring cached results:', e);
         localStorage.removeItem('cachedResults');
         localStorage.removeItem('cachedTicker');
-        localStorage.removeItem('cachedPrompt');
     }
 }
 

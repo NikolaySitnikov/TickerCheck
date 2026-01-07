@@ -295,43 +295,7 @@
             white-space: pre-wrap;
         }
 
-        /* Prompt textarea */
-        .prompt-section {
-            margin-top: 12px;
-        }
-
-        .prompt-label {
-            display: block;
-            font-size: 13px;
-            color: #888;
-            margin-bottom: 6px;
-        }
-
-        .prompt-textarea {
-            width: 100%;
-            min-height: 150px;
-            padding: 12px;
-            font-size: 14px;
-            font-family: inherit;
-            border: 1px solid #333;
-            border-radius: 8px;
-            background: #1a1a1a;
-            color: #fff;
-            resize: none;
-            outline: none;
-            overflow-y: hidden;
-            field-sizing: content;
-        }
-
-        .prompt-textarea:focus {
-            border-color: #10a37f;
-        }
-
-        .prompt-textarea::placeholder {
-            color: #666;
-        }
-
-        /* Analysis controls - always visible */
+        /* Analysis controls */
         .analysis-controls {
             margin-top: 20px;
             padding: 16px;
@@ -343,78 +307,63 @@
         .analyze-row {
             display: flex;
             gap: 10px;
+        }
+
+        /* Collapsible prompt section */
+        .prompt-collapsible {
+            margin-bottom: 16px;
+        }
+
+        .prompt-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: none;
+            border: none;
+            color: #888;
+            font-size: 13px;
+            cursor: pointer;
+            padding: 0;
+        }
+
+        .prompt-toggle:hover {
+            color: #fff;
+        }
+
+        .prompt-toggle .arrow {
+            transition: transform 0.2s;
+        }
+
+        .prompt-toggle.expanded .arrow {
+            transform: rotate(90deg);
+        }
+
+        .prompt-content {
+            display: none;
             margin-top: 12px;
         }
 
-        .package-btn {
-            background: #6366f1;
+        .prompt-content.visible {
+            display: block;
         }
 
-        .package-btn:hover:not(:disabled) {
-            background: #5558e3;
-        }
-
-        .package-section {
-            margin-top: 16px;
-            padding: 16px;
-            background: #111;
+        .prompt-textarea {
+            width: 100%;
+            min-height: 150px;
+            padding: 12px;
+            font-size: 13px;
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
             border: 1px solid #333;
             border-radius: 8px;
-        }
-
-        .package-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 12px;
-        }
-
-        .package-header h4 {
-            color: #6366f1;
-            margin: 0;
-            font-size: 14px;
-        }
-
-        .package-stats {
-            font-size: 12px;
-            color: #888;
-        }
-
-        .package-output {
-            background: #0a0a0a;
-            padding: 12px;
-            border-radius: 6px;
-            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
-            font-size: 11px;
-            max-height: 300px;
-            overflow-y: auto;
-            white-space: pre-wrap;
-            word-break: break-word;
+            background: #111;
             color: #ccc;
+            resize: vertical;
+            outline: none;
+            field-sizing: content;
         }
 
-        .package-images {
-            margin-top: 12px;
-        }
-
-        .package-images-label {
-            font-size: 12px;
-            color: #888;
-            margin-bottom: 8px;
-        }
-
-        .package-images-grid {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-        }
-
-        .package-images-grid img {
-            width: 60px;
-            height: 60px;
-            object-fit: cover;
-            border-radius: 4px;
-            border: 1px solid #333;
+        .prompt-textarea:focus {
+            border-color: #10a37f;
         }
     </style>
 </head>
@@ -437,32 +386,24 @@
 
         <div id="results" class="results"></div>
 
-        <!-- Analysis Controls - Always Visible -->
+        <!-- Analysis Controls -->
         <div class="analysis-controls">
-            <div class="prompt-section">
-                <label for="prompt-input" class="prompt-label">Analysis Prompt:</label>
-                <textarea
-                    id="prompt-input"
-                    class="prompt-textarea"
-                    placeholder="Enter your analysis prompt here (e.g., 'Analyze these tweets for sentiment, key themes, and notable claims about this ticker...')"
-                ></textarea>
+            <div class="prompt-collapsible">
+                <button id="prompt-toggle" class="prompt-toggle">
+                    <span class="arrow">▶</span>
+                    <span>Edit Analysis Prompt</span>
+                </button>
+                <div id="prompt-content" class="prompt-content">
+                    <textarea id="prompt-input" class="prompt-textarea"></textarea>
+                </div>
             </div>
             <div class="analyze-row">
-                <button id="package-btn" class="package-btn" disabled>Package Prompt</button>
                 <select id="model-select" class="model-select">
                     <option value="gpt-5-mini">GPT-5 Mini ($0.25/$2/M)</option>
                     <option value="gpt-5.2">GPT-5.2 ($1.75/$14/M) - Best Vision</option>
-                    <option value="gpt-5.2-search">GPT-5.2 + Web Search (+$0.01/search)</option>
+                    <option value="gpt-5.2-search" selected>GPT-5.2 + Web Search (+$0.01/search)</option>
                 </select>
                 <button id="analyze-btn" class="analyze-btn" disabled>Analyze with AI</button>
-            </div>
-            <div id="package-section" class="package-section" style="display: none;">
-                <div class="package-header">
-                    <h4>Packaged Prompt Preview</h4>
-                    <span id="package-stats" class="package-stats"></span>
-                </div>
-                <pre id="package-output" class="package-output"></pre>
-                <div id="package-images" class="package-images"></div>
             </div>
         </div>
 
