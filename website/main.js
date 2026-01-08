@@ -606,7 +606,12 @@ function parseMarkdownToHtml(text, options = {}) {
     }
 
     flushList();
-    return result.join('');
+
+    // Apply setup label coloring (Long/Short shades)
+    let finalHtml = result.join('');
+    finalHtml = colorSetupLabels(finalHtml);
+
+    return finalHtml;
 }
 
 /**
@@ -827,6 +832,51 @@ function formatInlineMarkdown(text, sectionName = '') {
         '<span class="level-text-invalidation">Invalidation:</span>');
 
     return result;
+}
+
+// Shade palettes for setups - distinctly different muted colors
+const LONG_SHADES = [
+    '#5a9e8f', // teal
+    '#7ab86e', // lime green
+    '#4a8fa8', // blue-teal
+    '#8faa5a', // olive green
+    '#5ac9a0', // mint
+    '#6b9e5a'  // forest green
+];
+const SHORT_SHADES = [
+    '#c9706e', // coral
+    '#b87a9e', // mauve/pink
+    '#c9956e', // orange-brown
+    '#9e6eb8', // purple
+    '#c96e8f', // rose
+    '#a87070'  // dusty red
+];
+
+/**
+ * Color setup labels (Long/Short) with dynamic shades
+ */
+function colorSetupLabels(html) {
+    let longIndex = 0;
+    let shortIndex = 0;
+
+    // Match <strong>Label:</strong> patterns where label contains "long" or "short"
+    return html.replace(/<strong>([^<]*(?:long|short)[^<]*?):<\/strong>/gi,
+        (match, label) => {
+            const labelLower = label.toLowerCase();
+            let color;
+
+            if (labelLower.includes('short')) {
+                color = SHORT_SHADES[shortIndex % SHORT_SHADES.length];
+                shortIndex++;
+            } else if (labelLower.includes('long')) {
+                color = LONG_SHADES[longIndex % LONG_SHADES.length];
+                longIndex++;
+            } else {
+                return match;
+            }
+
+            return `<span style="color: ${color}; font-weight: 600;">${label}:</span>`;
+        });
 }
 
 /**
