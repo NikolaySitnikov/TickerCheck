@@ -436,15 +436,405 @@ function showAnalysisStatus(message, type) {
 }
 
 /**
- * Display analysis results
+ * Parse markdown text into beautiful HTML
+ * @param {string} text - The markdown text to parse
+ * @param {object} options - Optional settings (timestamp, model for history entries)
+ */
+function parseMarkdownToHtml(text, options = {}) {
+    if (!text) return '';
+
+    // First escape HTML
+    let html = escapeHtml(text);
+
+    // Split into lines for processing
+    const lines = html.split('\n');
+    const result = [];
+    let inList = false;
+    let listItems = [];
+
+    const flushList = () => {
+        if (listItems.length > 0) {
+            result.push(`<ul class="analysis-list">${listItems.join('')}</ul>`);
+            listItems = [];
+        }
+        inList = false;
+    };
+
+    // Format timestamp if provided in options
+    const formatTimestamp = (ts) => {
+        if (!ts) return '';
+        const date = new Date(ts);
+        return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+        let line = lines[i];
+
+        // Skip empty lines but close lists
+        if (line.trim() === '') {
+            flushList();
+            continue;
+        }
+
+        // Main title with ticker (e.g., **$SOL BRIEF — 01/08/2026**)
+        if (line.match(/^\*\*\$[A-Z0-9]+ BRIEF.*\*\*$/)) {
+            flushList();
+            // If skipTitle is set, skip rendering the title card (it's rendered externally)
+            if (options.skipTitle) {
+                continue;
+            }
+            const title = line.replace(/\*\*/g, '');
+            const tickerMatch = title.match(/\$([A-Z0-9]+)/);
+            const ticker = tickerMatch ? tickerMatch[1] : '';
+            // Use provided timestamp from options, or fall back to the date in the text
+            const displayDate = options.timestamp ? formatTimestamp(options.timestamp) : (title.match(/—\s*(.+)$/) || [])[1] || '';
+            const modelBadge = options.model ? `<span class="analysis-title-model">${escapeHtml(options.model)}</span>` : '';
+            result.push(`
+                <div class="analysis-title-card">
+                    <div class="analysis-title-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M12 2L2 7l10 5 10-5-10-5z" fill="currentColor" opacity="0.2"/>
+                            <path d="M2 17l10 5 10-5"/>
+                            <path d="M2 12l10 5 10-5"/>
+                            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                        </svg>
+                    </div>
+                    <div class="analysis-title-content">
+                        <h2 class="analysis-main-title">$${ticker} <span class="title-brief">BRIEF</span></h2>
+                        ${displayDate ? `<div class="analysis-title-date">${displayDate}</div>` : ''}
+                    </div>
+                    ${modelBadge}
+                </div>
+            `);
+            continue;
+        }
+
+        // Section headers (e.g., **SENTIMENT**: or **KEY LEVELS**)
+        const sectionMatch = line.match(/^\*\*([A-Z][A-Z\s\/]+)\*\*:?\s*(.*)?$/);
+        if (sectionMatch) {
+            flushList();
+            const sectionName = sectionMatch[1].trim();
+            const sectionContent = sectionMatch[2] || '';
+
+            // Map section names to icons and colors
+            const sectionConfig = getSectionConfig(sectionName);
+
+            // If there's inline content after the header
+            if (sectionContent) {
+                // For CATALYSTS/NEWS and BOTTOM LINE, we need special bullet point handling
+                // even for inline content
+                let formattedContent;
+                if (sectionName === 'CATALYSTS / NEWS' || sectionName === 'CATALYSTS' || sectionName === 'NEWS') {
+                    const segments = splitBySourceLinks(sectionContent);
+                    if (segments.length > 1) {
+                        formattedContent = `<ul class="analysis-list">${segments.map(s => `<li>${formatInlineMarkdown(s.trim())}</li>`).join('')}</ul>`;
+                    } else {
+                        formattedContent = formatInlineMarkdown(sectionContent);
+                    }
+                } else if (sectionName === 'BOTTOM LINE') {
+                    const sentences = splitIntoSentences(sectionContent);
+                    if (sentences.length > 1) {
+                        formattedContent = `<ul class="analysis-list">${sentences.map(s => `<li>${formatInlineMarkdown(s.trim())}</li>`).join('')}</ul>`;
+                    } else {
+                        formattedContent = formatInlineMarkdown(sectionContent);
+                    }
+                } else {
+                    formattedContent = formatInlineMarkdown(sectionContent);
+                }
+                result.push(`
+                    <div class="analysis-section ${sectionConfig.class}">
+                        <div class="analysis-section-header">
+                            <span class="analysis-section-icon">${sectionConfig.icon}</span>
+                            <span class="analysis-section-title">${sectionName}</span>
+                        </div>
+                        <div class="analysis-section-content">${formattedContent}</div>
+                    </div>
+                `);
+            } else {
+                result.push(`
+                    <div class="analysis-section ${sectionConfig.class}">
+                        <div class="analysis-section-header">
+                            <span class="analysis-section-icon">${sectionConfig.icon}</span>
+                            <span class="analysis-section-title">${sectionName}</span>
+                        </div>
+                        <div class="analysis-section-content">
+                `);
+                // Content will follow in subsequent lines
+                // Look ahead for content
+                let contentLines = [];
+                let j = i + 1;
+                while (j < lines.length) {
+                    const nextLine = lines[j];
+                    // Stop at next section or empty line followed by section
+                    if (nextLine.match(/^\*\*[A-Z][A-Z\s\/]+\*\*:?/)) {
+                        break;
+                    }
+                    if (nextLine.trim() !== '') {
+                        contentLines.push(nextLine);
+                    } else if (contentLines.length > 0 && lines[j + 1]?.match(/^\*\*[A-Z]/)) {
+                        break;
+                    }
+                    j++;
+                }
+
+                // Process content lines, passing section name for special handling
+                const contentHtml = processContentLines(contentLines, sectionName);
+                result.push(contentHtml);
+                result.push(`</div></div>`);
+                i = j - 1; // Skip processed lines
+            }
+            continue;
+        }
+
+        // Horizontal rule
+        if (line.match(/^---+$/)) {
+            flushList();
+            continue; // Skip horizontal rules, our sections handle separation
+        }
+
+        // List items
+        if (line.match(/^[-•]\s+/)) {
+            const content = formatInlineMarkdown(line.replace(/^[-•]\s+/, ''));
+            listItems.push(`<li>${content}</li>`);
+            inList = true;
+            continue;
+        }
+
+        // Regular paragraph
+        flushList();
+        result.push(`<p class="analysis-paragraph">${formatInlineMarkdown(line)}</p>`);
+    }
+
+    flushList();
+    return result.join('');
+}
+
+/**
+ * Custom SVG icons for each section
+ */
+const SECTION_ICONS = {
+    sentiment: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 3v18h18"/>
+        <path d="M18 9l-5 5-4-4-3 3"/>
+        <circle cx="18" cy="9" r="2" fill="currentColor"/>
+        <circle cx="13" cy="14" r="2" fill="currentColor"/>
+        <circle cx="9" cy="10" r="2" fill="currentColor"/>
+    </svg>`,
+    levels: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 6h16"/>
+        <path d="M4 12h16"/>
+        <path d="M4 18h16"/>
+        <circle cx="8" cy="6" r="2" fill="currentColor"/>
+        <circle cx="16" cy="12" r="2" fill="currentColor"/>
+        <circle cx="10" cy="18" r="2" fill="currentColor"/>
+    </svg>`,
+    setups: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <circle cx="12" cy="12" r="6"/>
+        <circle cx="12" cy="12" r="2" fill="currentColor"/>
+        <path d="M12 2v4"/>
+        <path d="M12 18v4"/>
+        <path d="M2 12h4"/>
+        <path d="M18 12h4"/>
+    </svg>`,
+    catalysts: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="currentColor" opacity="0.2"/>
+        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+    </svg>`,
+    redflags: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 21V4"/>
+        <path d="M4 4l12 4-12 4"/>
+        <path d="M4 4l12 4-12 4" fill="currentColor" opacity="0.3"/>
+        <circle cx="19" cy="5" r="3" fill="currentColor" opacity="0.5"/>
+    </svg>`,
+    bottomline: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <path d="M12 6v6l4 2"/>
+        <circle cx="12" cy="12" r="3" fill="currentColor" opacity="0.3"/>
+    </svg>`,
+    default: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
+        <path d="M9 9h6"/>
+        <path d="M9 13h6"/>
+        <path d="M9 17h4"/>
+    </svg>`
+};
+
+/**
+ * Get section configuration (icon, class) based on section name
+ */
+function getSectionConfig(name) {
+    const configs = {
+        'SENTIMENT': { icon: SECTION_ICONS.sentiment, class: 'section-sentiment' },
+        'KEY LEVELS': { icon: SECTION_ICONS.levels, class: 'section-levels' },
+        'SETUPS WORTH WATCHING': { icon: SECTION_ICONS.setups, class: 'section-setups' },
+        'CATALYSTS / NEWS': { icon: SECTION_ICONS.catalysts, class: 'section-catalysts' },
+        'CATALYSTS': { icon: SECTION_ICONS.catalysts, class: 'section-catalysts' },
+        'NEWS': { icon: SECTION_ICONS.catalysts, class: 'section-catalysts' },
+        'RED FLAGS': { icon: SECTION_ICONS.redflags, class: 'section-redflags' },
+        'BOTTOM LINE': { icon: SECTION_ICONS.bottomline, class: 'section-bottomline' }
+    };
+    return configs[name] || { icon: SECTION_ICONS.default, class: 'section-default' };
+}
+
+/**
+ * Process content lines into HTML
+ * @param {string[]} lines - Array of content lines
+ * @param {string} sectionName - Name of the section (for special handling like BOTTOM LINE)
+ */
+function processContentLines(lines, sectionName = '') {
+    if (lines.length === 0) return '';
+
+    const result = [];
+    let listItems = [];
+
+    const flushList = () => {
+        if (listItems.length > 0) {
+            result.push(`<ul class="analysis-list">${listItems.join('')}</ul>`);
+            listItems = [];
+        }
+    };
+
+    // Join all lines first, then process
+    const fullText = lines.join(' ');
+
+    // For BOTTOM LINE, split by sentences
+    if (sectionName === 'BOTTOM LINE') {
+        const sentences = splitIntoSentences(fullText);
+        for (const sentence of sentences) {
+            if (sentence.trim()) {
+                listItems.push(`<li>${formatInlineMarkdown(sentence.trim())}</li>`);
+            }
+        }
+        flushList();
+        return result.join('');
+    }
+
+    // For CATALYSTS / NEWS, split by source links or sentences
+    if (sectionName === 'CATALYSTS / NEWS' || sectionName === 'CATALYSTS' || sectionName === 'NEWS') {
+        const segments = splitBySourceLinks(fullText);
+        for (const segment of segments) {
+            if (segment.trim()) {
+                listItems.push(`<li>${formatInlineMarkdown(segment.trim())}</li>`);
+            }
+        }
+        flushList();
+        return result.join('');
+    }
+
+    // Default processing for other sections
+    for (const line of lines) {
+        if (line.match(/^[-•]\s+/)) {
+            const content = formatInlineMarkdown(line.replace(/^[-•]\s+/, ''));
+            listItems.push(`<li>${content}</li>`);
+        } else {
+            flushList();
+            result.push(`<p>${formatInlineMarkdown(line)}</p>`);
+        }
+    }
+
+    flushList();
+    return result.join('');
+}
+
+/**
+ * Split text into sentences intelligently
+ */
+function splitIntoSentences(text) {
+    // Split on sentence endings followed by space and capital letter
+    const parts = text.split(/(?<=[.!?])\s+(?=[A-Z])/);
+    return parts.filter(p => p.trim()).map(p => p.trim());
+}
+
+/**
+ * Split text by source links to create bullet points
+ * URLs appear in format: ([domain](url)) - note the double )) at end
+ */
+function splitBySourceLinks(text) {
+    // The format from OpenAI is: text ([domain](url?utm_source=openai)) more text
+    // We want to split AFTER each )) to create separate bullet points
+
+    // Simple approach: find all occurrences of )) and split there
+    const segments = [];
+    let currentSegment = '';
+
+    for (let i = 0; i < text.length; i++) {
+        currentSegment += text[i];
+
+        // Check if we just added ))
+        if (currentSegment.endsWith('))')) {
+            // Check if next char is whitespace or end of string
+            const nextChar = text[i + 1];
+            if (!nextChar || /\s/.test(nextChar)) {
+                // This looks like end of a citation, save this segment
+                segments.push(currentSegment.trim());
+                currentSegment = '';
+                // Skip whitespace
+                while (i + 1 < text.length && /\s/.test(text[i + 1])) {
+                    i++;
+                }
+            }
+        }
+    }
+
+    // Don't forget remaining text
+    if (currentSegment.trim()) {
+        segments.push(currentSegment.trim());
+    }
+
+    // If we found multiple segments, return them
+    if (segments.length > 1) {
+        return segments;
+    }
+
+    // Fallback: split by sentences
+    return splitIntoSentences(text);
+}
+
+/**
+ * Format inline markdown (bold, italic, links, etc.)
+ * @param {string} text - The text to format
+ * @param {string} sectionName - Optional section name for context-specific formatting
+ */
+function formatInlineMarkdown(text, sectionName = '') {
+    let result = text
+        // Bold text
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        // Italic text
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        // Code
+        .replace(/`(.*?)`/g, '<code>$1</code>')
+        // Markdown links [text](url)
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" class="analysis-link">$1<svg class="link-icon" viewBox="0 0 12 12"><path d="M3.5 3a.5.5 0 0 0 0 1h3.793L2.146 9.146a.5.5 0 1 0 .708.708L8 4.707V8.5a.5.5 0 0 0 1 0v-5a.5.5 0 0 0-.5-.5h-5z" fill="currentColor"/></svg></a>')
+        // Plain URLs (https://...)
+        .replace(/(?<!\])\((https?:\/\/[^\s)]+)\)/g, '<a href="$1" target="_blank" rel="noopener" class="analysis-link analysis-link-source">source<svg class="link-icon" viewBox="0 0 12 12"><path d="M3.5 3a.5.5 0 0 0 0 1h3.793L2.146 9.146a.5.5 0 1 0 .708.708L8 4.707V8.5a.5.5 0 0 0 1 0v-5a.5.5 0 0 0-.5-.5h-5z" fill="currentColor"/></svg></a>')
+        // Highlight key trading terms
+        .replace(/\$(\d+(?:,\d{3})*(?:\.\d+)?[KMB]?)\b/g, '<span class="price-highlight">$$1</span>')
+        // Highlight percentage changes
+        .replace(/([+-]?\d+(?:\.\d+)?%)/g, '<span class="percent-highlight">$1</span>');
+
+    // Color-coded text for KEY LEVELS section - only at start of line/item
+    // Resistance - muted coral
+    result = result.replace(/^(<strong>)?Resistance(<\/strong>)?:/gim,
+        '<span class="level-text-resistance">Resistance:</span>');
+
+    // Support - muted teal
+    result = result.replace(/^(<strong>)?Support(<\/strong>)?:/gim,
+        '<span class="level-text-support">Support:</span>');
+
+    // Invalidation - muted amber
+    result = result.replace(/^(<strong>)?Invalidation(<\/strong>)?:/gim,
+        '<span class="level-text-invalidation">Invalidation:</span>');
+
+    return result;
+}
+
+/**
+ * Display analysis results with beautiful formatting
  */
 function displayAnalysis(text) {
-    // Convert markdown-style formatting to HTML (basic)
-    const formatted = escapeHtml(text)
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\n/g, '<br>');
-
-    analysisResults.innerHTML = formatted;
+    const html = parseMarkdownToHtml(text);
+    analysisResults.innerHTML = html;
 }
 
 /**
@@ -789,34 +1179,61 @@ function renderHistory(history) {
             `;
         }).join('');
 
-        // Analysis section if available
-        const analysisHtml = hasAnalysis ? `
-            <div class="history-analysis">
-                <div class="history-analysis-title">AI Analysis (${escapeHtml(entry.model || 'Unknown model')})</div>
-                <div class="history-analysis-text">${escapeHtml(entry.analysis)}</div>
-            </div>
-        ` : '';
+        // For entries WITH analysis: use the beautiful title card as the header
+        // For entries WITHOUT analysis: use the simple collapsible header
+        if (hasAnalysis) {
+            // Parse analysis but skip the title card (we'll make our own clickable one)
+            const analysisContentHtml = parseMarkdownToHtml(entry.analysis, { timestamp: entry.timestamp, model: entry.model, skipTitle: true });
 
-        return `
-            <div class="history-card" data-id="${entry.id}">
-                <div class="history-card-header">
-                    <span class="history-card-arrow">▶</span>
-                    <span class="history-card-ticker">${escapeHtml(entry.ticker)}</span>
-                    <span class="history-card-meta">${formattedDate} • ${tweetCount} tweets</span>
-                    ${hasAnalysis ? '<span class="history-card-badge">Analyzed</span>' : ''}
-                </div>
-                <div class="history-card-content">
-                    ${analysisHtml}
-                    <div class="history-tweets-preview">
-                        ${tweetsHtml}
+            return `
+                <div class="history-card history-card-analyzed" data-id="${entry.id}">
+                    <div class="history-card-header-rich">
+                        <div class="analysis-title-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M12 2L2 7l10 5 10-5-10-5z" fill="currentColor" opacity="0.2"/>
+                                <path d="M2 17l10 5 10-5"/>
+                                <path d="M2 12l10 5 10-5"/>
+                                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                            </svg>
+                        </div>
+                        <div class="analysis-title-content">
+                            <h2 class="analysis-main-title">${escapeHtml(entry.ticker)} <span class="title-brief">BRIEF</span></h2>
+                            <div class="analysis-title-date">${formattedDate} • ${tweetCount} tweets</div>
+                        </div>
+                        <span class="analysis-title-model">${escapeHtml(entry.model || 'AI')}</span>
+                        <span class="history-card-arrow">▶</span>
+                    </div>
+                    <div class="history-card-content">
+                        <div class="history-analysis">
+                            <div class="history-analysis-content">${analysisContentHtml}</div>
+                        </div>
+                        <div class="history-tweets-preview">
+                            ${tweetsHtml}
+                        </div>
                     </div>
                 </div>
-            </div>
-        `;
+            `;
+        } else {
+            // No analysis - use simple header
+            return `
+                <div class="history-card" data-id="${entry.id}">
+                    <div class="history-card-header">
+                        <span class="history-card-arrow">▶</span>
+                        <span class="history-card-ticker">${escapeHtml(entry.ticker)}</span>
+                        <span class="history-card-meta">${formattedDate} • ${tweetCount} tweets</span>
+                    </div>
+                    <div class="history-card-content">
+                        <div class="history-tweets-preview">
+                            ${tweetsHtml}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
     }).join('');
 
-    // Add click handlers for expand/collapse
-    historyCards.querySelectorAll('.history-card-header').forEach(header => {
+    // Add click handlers for expand/collapse (both simple and rich headers)
+    historyCards.querySelectorAll('.history-card-header, .history-card-header-rich').forEach(header => {
         header.addEventListener('click', () => {
             header.parentElement.classList.toggle('expanded');
         });
