@@ -814,7 +814,7 @@ function formatInlineMarkdown(text, sectionName = '') {
         // Plain URLs (https://...)
         .replace(/(?<!\])\((https?:\/\/[^\s)]+)\)/g, '<a href="$1" target="_blank" rel="noopener" class="analysis-link analysis-link-source">source<svg class="link-icon" viewBox="0 0 12 12"><path d="M3.5 3a.5.5 0 0 0 0 1h3.793L2.146 9.146a.5.5 0 1 0 .708.708L8 4.707V8.5a.5.5 0 0 0 1 0v-5a.5.5 0 0 0-.5-.5h-5z" fill="currentColor"/></svg></a>')
         // Highlight key trading terms
-        .replace(/\$(\d+(?:,\d{3})*(?:\.\d+)?[KMB]?)\b/g, '<span class="price-highlight">$$1</span>')
+        .replace(/\$(\d+(?:,\d{3})*(?:\.\d+)?[KMB]?)\b/g, '<span class="price-highlight">$$$1</span>')
         // Highlight percentage changes
         .replace(/([+-]?\d+(?:\.\d+)?%)/g, '<span class="percent-highlight">$1</span>');
 

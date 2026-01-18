@@ -40,7 +40,7 @@ if [ "$START_CHROME" = true ]; then
         --disable-session-crashed-bubble \
         --disable-infobars \
         "http://localhost:5180" \
-        "https://x.com" &
+        "https://x.com" > /dev/null 2>&1 &
     sleep 3
     echo "[OK] Chrome started with 2 tabs:"
     echo "    - Tab 1: Search panel (localhost:5180)"

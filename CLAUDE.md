@@ -148,3 +148,52 @@ for (const item of data.output) {
   - Max 20 entries, oldest auto-deleted
   - Clear History button to wipe all saved searches
 - **Input Clear Button**: Small × inside ticker input field to quickly clear text
+
+## Troubleshooting
+
+### Worker Not Processing Jobs ("Waiting for worker..." stuck)
+
+**Symptoms**: Jobs stay in "pending" status, UI shows "Waiting for worker..." indefinitely, worker process appears to run but produces no output.
+
+**Root Cause**: Corrupted `node_modules`, particularly `puppeteer-core`. This can happen after system updates, interrupted npm installs, or disk issues.
+
+**Solution**:
+```bash
+# From project root
+rm -rf node_modules package-lock.json
+npm install
+./start.sh
+```
+
+### Chrome Window Doesn't Open
+
+**Symptoms**: `start.sh` says "Chrome debug port 9222 is already active" but no Chrome window is visible.
+
+**Root Cause**: A previous Chrome debug process is still running in the background without a visible window.
+
+**Solution**:
+```bash
+# Find and kill the orphaned Chrome process
+lsof -i :9222
+kill <PID from above>
+./start.sh
+```
+
+### Stale Pending Jobs in Database
+
+If there are old "pending" jobs stuck in the database, the worker will try to process them on startup. To clear them:
+
+```bash
+# Mark all pending jobs as failed (via Supabase REST API)
+curl -X PATCH "https://<your-project>.supabase.co/rest/v1/jobs?status=eq.pending" \
+  -H "apikey: <your-key>" \
+  -H "Authorization: Bearer <your-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"status": "failed"}'
+```
+
+### Claude Code Cannot Start Services Reliably
+
+**Important**: When using Claude Code to start `./start.sh`, long-running processes may get terminated when the Bash tool times out or is interrupted.
+
+**Best Practice**: Always run `./start.sh` directly in your own terminal, not through Claude Code. Claude Code should only be used for code changes and debugging, not for running persistent services.
